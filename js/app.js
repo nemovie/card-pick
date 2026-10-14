@@ -18,10 +18,9 @@ const ICONS = {
   home: '<path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
   cards: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18"/>',
   list: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/>',
-  strategy: '<path d="M12 3l2.5 5.5L20 9l-4 4 1 6-5-3-5 3 1-6-4-4 5.5-.5z"/>',
   more: '<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>'
 };
-const NAV = [["home", "홈"], ["cards", "내 카드"], ["list", "사용내역"], ["strategy", "전략"], ["more", "더보기"]];
+const NAV = [["home", "홈"], ["cards", "내 카드"], ["list", "사용내역"], ["more", "더보기"]];
 const ENABLED = ["home", "cards", "list", "more"]; // 구현 완료된 탭
 function renderNav() {
   const html = NAV.map(([k, label]) =>
@@ -189,7 +188,6 @@ function renderDashboard() {
   const hasPrev = state.txs.some(t => t.month === prev);
   const prevTotal = state.cards.reduce((s, c) => s + calcFor(c, state.txs, prev).sum, 0);
   const diff = total - prevTotal;
-  const recos = recommendation(rows);
 
   v.innerHTML = `
   <section class="summary">
@@ -221,14 +219,19 @@ function renderDashboard() {
       </div>
       <div class="cc-foot" style="margin-top:8px"><span>이번 달 혜택</span><b>${won(r.sum)}원</b></div>
     </article>`;
-  }).join("")}</section>
+  }).join("")}</section>`;
+}
 
-  ${recos.length ? `<div class="box reco"><div class="ico">💡</div><div class="reco-body">
+/* 추천 결제 박스 (더보기 탭에서 사용) */
+function recoBox(rows) {
+  const recos = recommendation(rows);
+  if (!recos.length) return "";
+  return `<div class="box reco"><div class="ico">💡</div><div class="reco-body">
       <small>이번 달 추천 결제 · 오늘 기준</small>
       ${recos.map(x => `<div class="reco-row"><i class="dot" style="background:${esc(x.card.color)}"></i>
         <div class="rn"><b>${esc(x.card.name)}</b><span>${esc(x.b.n)}${x.rem !== Infinity ? ` · 남은 ${x.rem}회` : ""}</span></div>
         <b class="ra">최대 ${won(x.left)}원</b></div>`).join("")}
-    </div></div>` : ""}`;
+    </div></div>`;
 }
 
 /* ---------- 화면 전환 ---------- */
@@ -403,7 +406,8 @@ function renderCardView(card) {
 
 function renderMore() {
   const u = state.user;
-  $("view").innerHTML = `<div class="list-wrap"><section class="rows">
+  const rows = state.cards.map(card => ({ card, r: calcFor(card, state.txs, monthKey()) }));
+  $("view").innerHTML = `<div class="list-wrap">${recoBox(rows)}<section class="rows">
     <button class="box row-card more-row" type="button" data-logout>
       <div class="more-ico" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/></svg></div>
       <div class="mid"><div class="nm">로그아웃</div><div class="meta">${esc(u?.email || u?.displayName || "")}</div></div>
