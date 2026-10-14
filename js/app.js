@@ -144,16 +144,28 @@ async function seedCards() {
 }
 
 /* ---------- 대시보드 ---------- */
+// 오늘 기준으로 실제 받을 수 있는 혜택만 골라, 카드별 최고 혜택 1개씩 상위 3개를 돌려준다
 function recommendation(rows) {
-  let best = null;
-  rows.forEach(({ card, r }) => card.benefits.forEach((b, i) => {
-    const max = benefitMax(b);
-    if (max === Infinity || slotCap(b) - r.used[i] <= 0) return;
-    let left = max - r.per[i];
-    if (b.group && b.groupMax != null) left = Math.min(left, b.groupMax - (r.grp[b.group] || 0));
-    if (left > 0 && (!best || left > best.left)) best = { card, b, left };
-  }));
-  return best;
+  const prev = prevMonthKey(), td = today(), out = [];
+  rows.forEach(({ card, r }) => {
+    const prevTxs = state.txs.filter(t => t.month === prev && t.cardId === card.id);
+    const prevSpent = prevTxs.reduce((sum, t) => sum + (t.amount || 0), 0);
+    // 전월 기록이 있는데 전월 실적에 못 미친 카드는 이번 달 혜택이 적용되지 않음
+    if (prevTxs.length && prevSpent < card.target) return;
+    let best = null;
+    card.benefits.forEach((b, i) => {
+      if (b.all || b.addon) return;                          // 자동 적용형·추가 혜택은 제외
+      if (b.prevMin != null && prevSpent < b.prevMin) return; // 전월 사용액 조건 미달
+      const max = benefitMax(b), rem = slotCap(b) - r.used[i];
+      if (max === Infinity || rem <= 0) return;
+      if (b.daily && r.days[i].has(td)) return;               // 오늘 이미 쓴 일 1회 혜택
+      let left = max - r.per[i];
+      if (b.group && b.groupMax != null) left = Math.min(left, b.groupMax - (r.grp[b.group] || 0)); // 통합 한도
+      if (left > 0 && (!best || left > best.left)) best = { card, b, left, rem };
+    });
+    if (best) out.push(best);
+  });
+  return out.sort((x, y) => y.left - x.left).slice(0, 3);
 }
 
 function renderDashboard() {
@@ -177,7 +189,7 @@ function renderDashboard() {
   const hasPrev = state.txs.some(t => t.month === prev);
   const prevTotal = state.cards.reduce((s, c) => s + calcFor(c, state.txs, prev).sum, 0);
   const diff = total - prevTotal;
-  const best = recommendation(rows);
+  const recos = recommendation(rows);
 
   v.innerHTML = `
   <section class="summary">
@@ -211,9 +223,12 @@ function renderDashboard() {
     </article>`;
   }).join("")}</section>
 
-  ${best ? `<div class="box reco"><div class="ico">💡</div><div>
-      <small>이번 달 추천 결제</small>
-      <b>${esc(best.card.name)}로 ${esc(best.b.n)}<br>최대 ${won(best.left)}원 더 받을 수 있어요</b></div></div>` : ""}`;
+  ${recos.length ? `<div class="box reco"><div class="ico">💡</div><div class="reco-body">
+      <small>이번 달 추천 결제 · 오늘 기준</small>
+      ${recos.map(x => `<div class="reco-row"><i class="dot" style="background:${esc(x.card.color)}"></i>
+        <div class="rn"><b>${esc(x.card.name)}</b><span>${esc(x.b.n)}${x.rem !== Infinity ? ` · 남은 ${x.rem}회` : ""}</span></div>
+        <b class="ra">최대 ${won(x.left)}원</b></div>`).join("")}
+    </div></div>` : ""}`;
 }
 
 /* ---------- 화면 전환 ---------- */

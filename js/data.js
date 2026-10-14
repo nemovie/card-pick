@@ -134,5 +134,5 @@ export function calcCard(card, txs, opts = {}) {
         if (ab.all && !applied && qualifies(ab, t.amount)) add(t, j, cut(t.amount * ab.rate));
       });
     });
-  return { spent, per, used, by, grp, sums, sum: per.reduce((a, b) => a + b, 0) };
+  return { spent, per, used, by, grp, sums, days, sum: per.reduce((a, b) => a + b, 0) };
 }
