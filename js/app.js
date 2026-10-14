@@ -247,7 +247,9 @@ window.addEventListener("popstate", e => {
   state.detail = e.state?.detail ?? null;
   state.cardView = e.state?.cardView ?? null;
   state.form = e.state?.form ? state.form : null;
+  state.modal = e.state?.modal ? state.modal : null;
   render();
+  renderModal(); // 팝업이 닫혀야 하면 숨김 처리
 });
 
 function render() {
@@ -426,13 +428,22 @@ function allTxs() {
   [...state.txs, ...(state.histTxs || [])].forEach(t => m.set(t.id, t));
   return [...m.values()];
 }
-function openModal(id) { state.modal = { id, del: false }; renderModal(); }
-function closeModal() { state.modal = null; renderModal(); }
+// 팝업도 뒤로가기 기록에 한 칸 쌓아서, 뒤로가기를 누르면 팝업만 닫히게 함
+function openModal(id) {
+  state.modal = { id, del: false };
+  history.pushState({ detail: state.detail, cardView: state.cardView, modal: true, d: navDepth() + 1 }, "");
+  renderModal();
+}
+function closeModal() {
+  const had = history.state?.modal;
+  state.modal = null; renderModal(); // 화면부터 닫고
+  if (had) history.back();           // 쌓아둔 기록 한 칸 제거
+}
 function renderModal() {
   const el = $("modal"), mo = state.modal;
   const pool = allTxs();
   const t = mo && pool.find(x => x.id === mo.id), card = t && state.cards?.find(c => c.id === t.cardId);
-  if (!t || !card) { state.modal = null; el.hidden = true; el.innerHTML = ""; document.body.classList.remove("no-scroll"); return; }
+  if (!t || !card) { state.modal = null; if (mo && history.state?.modal) history.back(); el.hidden = true; el.innerHTML = ""; document.body.classList.remove("no-scroll"); return; }
   const gain = calcFor(card, pool, t.month).by[t.id] || 0;
   const b = card.benefits[t.benefitIdx], eb = t.extraIdx != null ? card.benefits[t.extraIdx] : null;
   const listPrice = b && b.ticket != null ? (t.list ?? b.list) : null;
@@ -492,9 +503,11 @@ function openEdit(id) {
   if (t.extraIdx != null && card.extra) f.area = Math.max(0, card.extra.options.findIndex(o => o.idx === t.extraIdx));
   const b = card.benefits[f.benefitIdx];
   f.list = isMain && b && b.ticket != null ? String(t.list ?? b.list ?? "") : "";
-  closeModal();
+  const fromModal = !!history.state?.modal;
+  state.modal = null; renderModal();
   state.form = f;
-  history.pushState({ detail: state.detail, cardView: state.cardView, form: true, d: navDepth() + 1 }, "");
+  const fs = { detail: state.detail, cardView: state.cardView, form: true, d: navDepth() + (fromModal ? 0 : 1) };
+  if (fromModal) history.replaceState(fs, ""); else history.pushState(fs, "");
   render(); window.scrollTo(0, 0);
 }
 function openForm(cardId) {
