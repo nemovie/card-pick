@@ -71,11 +71,11 @@ button{font:inherit;color:inherit;cursor:pointer}
 .cc-foot{display:flex;justify-content:space-between;font-size:13px;color:var(--t2)}
 .cc-foot b{color:var(--tx)}
 
-.reco{margin-top:16px;display:flex;gap:12px;align-items:center;background:var(--ab);border-color:transparent;box-shadow:none}
+.reco{margin-top:16px;display:flex;gap:12px;align-items:center}
 .reco .ico{font-size:24px}
 .reco{align-items:flex-start}
 .reco-body{flex:1;min-width:0}
-.reco-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid color-mix(in srgb,var(--ac) 14%,transparent)}
+.reco-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--bd)}
 .reco-row:first-of-type{border-top:0}
 .reco-row .rn{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
 .reco-row .rn b{font-size:14px}.reco-row .rn span{font-size:12px;color:var(--t2)}
