@@ -33,7 +33,7 @@ document.addEventListener("click", e => {
   const b = e.target.closest("[data-nav]");
   if (b) {
     const k = b.dataset.nav;
-    if (ENABLED.includes(k)) { state.tab = k; state.detail = null; state.form = null; state.cardView = null; state.modal = null; if (k === "list") ensureHist(); renderNav(); render(); window.scrollTo(0, 0); }
+    if (ENABLED.includes(k)) { resetNav(); state.tab = k; state.detail = null; state.form = null; state.cardView = null; state.modal = null; if (k === "list") ensureHist(); renderNav(); render(); window.scrollTo(0, 0); }
     else toast("이 화면은 다음 단계에서 구현해요");
   }
   const mb = e.target.closest("[data-month]");
@@ -80,6 +80,7 @@ $("btn-google").addEventListener("click", async () => {
 document.addEventListener("keydown", e => { if (e.key === "Escape" && state.modal) closeModal(); });
 
 function start() {
+  resetNav(); // 새로고침/앱 복원 후 남아있는 상세·폼 기록 정리
   renderNav();
   if (!configured) {
     $("login").hidden = false;
@@ -235,14 +236,17 @@ function recoBox(rows) {
 }
 
 /* ---------- 화면 전환 ---------- */
+// 뒤로가기 기록 관리: 화면을 쌓을 때마다 깊이(d)를 기록해 두고, 탭 이동/새로고침 때 쌓인 만큼 한 번에 되돌린다
+const navDepth = () => history.state?.d || 0;
+function resetNav() { const d = navDepth(); if (d) history.go(-d); }
 function openDetail(id) {
-  state.detail = id; history.pushState({ detail: id }, "");
+  state.detail = id; history.pushState({ detail: id, d: navDepth() + 1 }, "");
   render(); window.scrollTo(0, 0);
 }
 window.addEventListener("popstate", e => {
   state.detail = e.state?.detail ?? null;
   state.cardView = e.state?.cardView ?? null;
-  state.form = e.state?.form ? (state.form || (state.cards?.length ? newForm(null) : null)) : null;
+  state.form = e.state?.form ? state.form : null;
   render();
 });
 
@@ -378,7 +382,7 @@ const txRow = (t, sub, gain) => `<div class="tx-row tap" data-tx="${esc(t.id)}">
   <div class="tx-r"><b>${won(t.amount || 0)}원</b>${gain > 0 ? `<div class="gain">+${won(gain)}원 혜택</div>` : ""}</div></div>`;
 
 function openCardView(id) {
-  state.cardView = id; history.pushState({ cardView: id }, "");
+  state.cardView = id; history.pushState({ cardView: id, d: navDepth() + 1 }, "");
   render(); window.scrollTo(0, 0);
 }
 
@@ -490,13 +494,13 @@ function openEdit(id) {
   f.list = isMain && b && b.ticket != null ? String(t.list ?? b.list ?? "") : "";
   closeModal();
   state.form = f;
-  history.pushState({ detail: state.detail, cardView: state.cardView, form: true }, "");
+  history.pushState({ detail: state.detail, cardView: state.cardView, form: true, d: navDepth() + 1 }, "");
   render(); window.scrollTo(0, 0);
 }
 function openForm(cardId) {
   if (!state.cards?.length) return toast("먼저 카드를 불러와 주세요");
   state.form = newForm(cardId);
-  history.pushState({ detail: state.detail, cardView: state.cardView, form: true }, "");
+  history.pushState({ detail: state.detail, cardView: state.cardView, form: true, d: navDepth() + 1 }, "");
   render(); window.scrollTo(0, 0);
 }
 // 이 결제에 실제로 붙일 추가 혜택 번호 (없으면 null)
@@ -606,7 +610,8 @@ document.addEventListener("change", e => {
 
 function saveForm() {
   const f = state.form, card = f && cardById(f.cardId);
-  if (!card || !formValid(f, card)) return;
+  if (!card || !formValid(f, card) || f.saving) return;
+  f.saving = true; // 연타해도 한 번만 저장/뒤로가기
   const tx = { cardId: card.id, month: f.date.slice(0, 7), date: f.date, place: f.place.trim(), amount: +f.amount,
     benefitIdx: f.benefitOn ? f.benefitIdx : -1, createdAt: serverTimestamp() };
   const ei = formExtraIdx(f, card);
