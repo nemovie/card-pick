@@ -14,7 +14,7 @@
 //  daily: true → 같은 날짜에는 1회만 적용 (같은 날 두 번째 결제부터는 혜택·횟수 차감 없음)
 //  ticket: 결제금액(원) / list: 기본 정가(원) → 혜택 = 정가 - 실제 결제금액 (결제 내역에 list 값이 있으면 그 값 우선)
 //  card.pools: 카드 상세에 보여줄 통합 한도 [{ group, label, max, color? }] (2개 이상이면 poolTitle로 한 줄 합산, 색 구분 막대) (혜택에는 group/groupMax를 같이 지정)
-export const SEED_VERSION = 14; // 카드 기본 규칙을 바꿀 때 올리면 기존 카드가 자동 갱신됨
+export const SEED_VERSION = 15; // 카드 기본 규칙을 바꿀 때 올리면 기존 카드가 자동 갱신됨
 export const CARD_SEED = [
   { id: "sam", name: "삼성 iD Simple", type: "신용", color: "#3b6df0", target: 300000, benefits: [
     { n: "영화 할인 (CGV·롯데시네마·메가박스)", fixed: 3000, min: 10000, slots: 1 },
@@ -49,7 +49,7 @@ export const CARD_SEED = [
     { n: "스타벅스 10% 할인", s: "월 최대 3,000원 · 횟수 제한 없음", rate: 0.1, max: 3000, slots: null, group: "total", groupMax: 20000 },
     { n: "온라인 KB Pay 결제 2% 추가 할인", s: "전월 30만원 이상 시 · 다른 혜택에 추가 · 월 최대 2,000원", rate: 0.02, max: 2000, slots: null, addon: true, prevMin: 300000, group: "total", groupMax: 20000 },
     { n: "오프라인 KB Pay 결제 2% 추가 할인", s: "전월 30만원 이상 시 · 다른 혜택에 추가 · 월 최대 3,000원", rate: 0.02, max: 3000, slots: null, addon: true, prevMin: 300000, group: "total", groupMax: 20000 } ] },
-  { id: "pang", name: "KB 팡팡 check", type: "체크", color: "#ec5b7a", target: 200000,
+  { id: "pang", name: "KB 팡팡 Check", type: "체크", color: "#ec5b7a", target: 200000,
     extra: { label: "KB Pay 결제 여부", hint: "G마켓·11번가·SSG.COM 혜택일 때 10% 추가 할인", options: [{ idx: 1 }] },
     pools: [{ group: "total", label: "통합 월 할인한도", max: 20000, note: "KB Pay 추가 혜택 포함" }], benefits: [
     { n: "G마켓·11번가·SSG.COM 10% 할인", s: "월 최대 7,000원 · 횟수 제한 없음", rate: 0.1, max: 7000, slots: null, group: "total", groupMax: 20000 },
