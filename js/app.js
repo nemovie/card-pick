@@ -69,6 +69,7 @@ function toast(msg) {
 $("btn-google").addEventListener("click", async () => {
   $("login-msg").textContent = "";
   const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: "select_account" }); // 로그인된 계정이 있어도 항상 계정 선택 화면 표시
   try {
     await signInWithPopup(auth, provider);
   } catch (err) {
@@ -77,7 +78,6 @@ $("btn-google").addEventListener("click", async () => {
     $("login-msg").textContent = "로그인에 실패했어요: " + err.code;
   }
 });
-$("btn-add").addEventListener("click", () => openForm(null));
 document.addEventListener("keydown", e => { if (e.key === "Escape" && state.modal) closeModal(); });
 
 function start() {
@@ -244,6 +244,10 @@ function render() {
   else if (state.tab === "more") renderMore();
   else renderCards();
   if (state.modal) renderModal();
+  // 플로팅 + 버튼: 폼 화면·더보기·카드 없음일 때는 숨김, 카드 화면에서는 그 카드가 미리 선택됨
+  const fab = $("fab");
+  fab.hidden = formOpen || !state.cards?.length || (state.tab === "more" && !card && !cview);
+  fab.dataset.add = card?.id || cview?.id || "";
 }
 
 /* ---------- 내 카드 목록 ---------- */
