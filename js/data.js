@@ -113,6 +113,14 @@ export const periodStart = (month, p) => month.slice(0, 4) + "-" + String(Math.f
  * 반환: spent(기준 달 실적), sum(기준 달 혜택 합계), per[i]/used[i]/sums[i]/days[i](기준 달이 속한 기간의 값),
  *       by[txId](결제별 혜택), grp(그룹별 누적 혜택)
  */
+// 정렬 기준: 날짜 → 입력 순서(createdAt) → id
+// createdAt이 아직 확정 전(저장 직후/오프라인)이면 가장 최근 입력으로 취급
+const seqOf = t => t.createdAt?.toMillis?.() ?? Infinity;
+export const byEntry = (a, b) =>
+  (a.date || "").localeCompare(b.date || "") ||
+  (seqOf(a) === seqOf(b) ? 0 : seqOf(a) < seqOf(b) ? -1 : 1) ||
+  String(a.id).localeCompare(String(b.id));
+
 export function calcCard(card, txs, opts = {}) {
   const cm = opts.month || txs.reduce((a, t) => (mo(t) > a ? mo(t) : a), "");
   const scope = txs.filter(t => mo(t) && mo(t) <= cm);
@@ -147,7 +155,7 @@ export function calcCard(card, txs, opts = {}) {
     return true;
   };
 
-  [...scope].sort((a, b) => (a.date || "").localeCompare(b.date || "") || String(a.id).localeCompare(String(b.id)))
+  [...scope].sort(byEntry)
     .forEach(t => {
       const applied = grant(t, t.benefitIdx); // 선택한 혜택이 실제로 적용된 결제인지
       if (t.extraIdx != null && t.extraIdx !== t.benefitIdx) grant(t, t.extraIdx); // 추가 혜택(KB Pay 등)

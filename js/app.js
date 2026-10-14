@@ -2,7 +2,7 @@ import {
   configured, auth, db, GoogleAuthProvider, signInWithPopup, signInWithRedirect,
   onAuthStateChanged, signOut, collection, doc, onSnapshot, query, where, orderBy, writeBatch, addDoc, serverTimestamp, deleteDoc, updateDoc, deleteField
 } from "./firebase.js";
-import { CARD_SEED, SEED_VERSION, CARD_IMG, calcCard, benefitMax, slotCap, PERIOD_UNIT, monthKey, prevMonthKey, won } from "./data.js";
+import { CARD_SEED, SEED_VERSION, CARD_IMG, calcCard, byEntry, benefitMax, slotCap, PERIOD_UNIT, monthKey, prevMonthKey, won } from "./data.js";
 
 const $ = id => document.getElementById(id);
 // 한 달치 계산: 전월 사용액(prevMin 조건)까지 같이 넘겨준다
@@ -360,6 +360,7 @@ function renderHistory() {
     const byTx = {}; rows.forEach(({ r }) => Object.assign(byTx, r.by));
     const groups = {};
     selTxs.filter(t => cardOf[t.cardId]).forEach(t => (groups[t.date || ""] ||= []).push(t));
+    Object.values(groups).forEach(g => g.sort((x, y) => byEntry(y, x)));
     const dates = Object.keys(groups).sort((a, b) => b.localeCompare(a));
     body = dates.length ? dates.map(d => `<div class="day-h"><span>${dateLabel(d)}</span><span>${won(groups[d].reduce((s, t) => s + (t.amount || 0), 0))}원 사용</span></div>
       <div class="box">${groups[d].map(t => {
@@ -390,7 +391,7 @@ function renderCardView(card) {
   if (state.histTxs === null) { $("view").innerHTML = `<div class="detail">${head}<div class="skeleton"></div><div class="skeleton"></div></div>`; return; }
   const r = calcFor(card, state.histTxs, sel);
   const txs = state.histTxs.filter(t => t.month === sel && t.cardId === card.id)
-    .sort((a, b) => (b.date || "").localeCompare(a.date || "") || String(b.id).localeCompare(String(a.id)));
+    .sort((a, b) => byEntry(b, a));
   $("view").innerHTML = `<div class="detail">${head}
     <section class="summary">
       <div class="box"><div class="label">사용 금액</div><div class="stat-v">${won(r.spent)}원</div><div class="label">${txs.length}건</div></div>
@@ -659,7 +660,7 @@ function renderDetail(card) {
   const r = calcFor(card, state.txs, cur);
   const need = card.target - r.spent;
   const pct = Math.min(100, r.spent / card.target * 100);
-  const recent = [...txs].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  const recent = [...txs].sort((a, b) => byEntry(b, a));
 
   $("view").innerHTML = `<div class="detail" style="--c:${esc(card.color)}">
     <div class="d-head">
