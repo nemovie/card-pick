@@ -39,6 +39,9 @@ button{font:inherit;color:inherit;cursor:pointer}
 .menu button{width:100%;text-align:left;border:0;background:none;padding:10px;border-radius:10px;font-weight:600}
 .menu button:hover{background:var(--ab)}
 
+.fab{position:fixed;right:calc(16px + env(safe-area-inset-right,0px));bottom:calc(74px + env(safe-area-inset-bottom,0px));width:56px;height:56px;border-radius:50%;border:0;padding:0;background:var(--ac);color:#fff;display:grid;place-items:center;box-shadow:0 6px 18px rgba(47,109,246,.4);z-index:20;cursor:pointer}
+.fab:active{transform:scale(.94)}
+.fab svg{width:26px;height:26px}
 .tabbar{position:fixed;left:0;right:0;bottom:0;display:flex;background:var(--card);border-top:1px solid var(--bd);padding-bottom:env(safe-area-inset-bottom);z-index:10}
 .tabbar button{flex:1;border:0;background:none;padding:10px 0 8px;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;color:var(--t2)}
 .nav-btn svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
@@ -198,4 +201,5 @@ body.no-scroll{overflow:hidden}
   .summary .hero{grid-column:auto}
   .cards{grid-template-columns:repeat(auto-fill,minmax(320px,1fr))}
   .toast{bottom:32px}
+  .fab{right:36px;bottom:36px;width:60px;height:60px}
 }
