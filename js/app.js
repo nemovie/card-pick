@@ -2,12 +2,12 @@ import {
   configured, auth, db, GoogleAuthProvider, signInWithPopup, signInWithRedirect,
   onAuthStateChanged, signOut, collection, doc, onSnapshot, query, where, orderBy, writeBatch, addDoc, serverTimestamp, deleteDoc, updateDoc, deleteField
 } from "./firebase.js";
-import { CARD_SEED, SEED_VERSION, CARD_IMG, calcCard, benefitMax, slotCap, monthKey, prevMonthKey, won } from "./data.js";
+import { CARD_SEED, SEED_VERSION, CARD_IMG, calcCard, benefitMax, slotCap, PERIOD_UNIT, monthKey, prevMonthKey, won } from "./data.js";
 
 const $ = id => document.getElementById(id);
 // 한 달치 계산: 전월 사용액(prevMin 조건)까지 같이 넘겨준다
 const spentOf = (pool, m, cardId) => pool.filter(t => t.month === m && t.cardId === cardId).reduce((s, t) => s + (t.amount || 0), 0);
-const calcFor = (card, pool, m) => calcCard(card, pool.filter(t => t.month === m && t.cardId === card.id), { prevSpent: spentOf(pool, shiftMonth(m, -1), card.id) });
+const calcFor = (card, pool, m) => calcCard(card, pool.filter(t => t.cardId === card.id && t.month <= m), { month: m, prevSpent: spentOf(pool, shiftMonth(m, -1), card.id) });
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 const state = { user: null, cards: null, txs: [], unsubs: [], tab: "home", detail: null,
@@ -111,7 +111,7 @@ function subscribe(uid) {
   }, err => toast("카드 불러오기 실패: " + err.code)));
 
   const txQ = query(collection(db, "users", uid, "transactions"),
-    where("month", "in", [monthKey(), prevMonthKey(), shiftMonth(monthKey(), -2)]));
+    where("month", ">=", shiftMonth(monthKey(), -7))); // 반기 혜택까지 계산하려고 최근 8개월을 불러옴
   state.unsubs.push(onSnapshot(txQ, snap => {
     state.txs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     render();
@@ -305,7 +305,7 @@ function subscribeHist() {
   if (!state.user) return;
   state.histKey = state.month;
   const q = query(collection(db, "users", state.user.uid, "transactions"),
-    where("month", "in", [state.month, shiftMonth(state.month, -1), shiftMonth(state.month, -2)]));
+    where("month", ">=", shiftMonth(state.month, -7)), where("month", "<=", state.month));
   state.histUnsub = onSnapshot(q, snap => {
     state.histTxs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     if (state.tab === "list" && !state.detail) render();
@@ -632,8 +632,9 @@ function benefitDesc(b) {
   const p = [];
   if (b.fixed != null) p.push(`${b.min ? won(b.min) + "원 이상 결제 시 " : ""}${won(b.fixed)}원`);
   else { p.push(`${+(b.rate * 100).toFixed(1)}%`); if (b.per) p.push(`1회 최대 ${won(b.per)}원`); }
-  if (b.max) p.push(`월 최대 ${won(b.max)}원`);
-  if (b.slots > 1) p.push(`월 ${b.slots}회`); else if (b.slots === 1 && b.fixed != null) p.push("월 1회");
+  const u = PERIOD_UNIT[b.period || 1] || "월";
+  if (b.max) p.push(`${u} 최대 ${won(b.max)}원`);
+  if (b.slots > 1) p.push(`${u} ${b.slots}회`); else if (b.slots === 1 && (b.fixed != null || b.period > 1)) p.push(`${u} 1회`);
   return p.join(" · ");
 }
 

@@ -6,6 +6,7 @@
 //  all: true → 혜택 선택 없이 모든 결제에 자동 적용 (min: 이상, lt: 미만 결제에만)
 //  sumMin: 이 혜택으로 고른 결제금액의 월 누적 합이 이 금액 이상이 되면 적용 (대중교통처럼 합산 조건일 때)
 //  slots: null → 횟수 제한 없음
+//  period: 한도(max)·횟수(slots)·일 1회·합산 한도를 세는 기간(개월). 생략=1(매월), 3=분기, 6=반기(1~6월/7~12월), 12=연(1~12월). 달력 기준
 //  addon: true → 다른 혜택에 덧붙는 추가 혜택. 결제 내역에서 extraIdx로 지정하면 benefitIdx(기본 혜택)와 함께 적용
 //  prevMin: 전월 사용액이 이 금액 이상일 때만 적용 (calcCard의 opts.prevSpent로 판단)
 //  needs: 결제 내역의 기본 혜택(benefitIdx)이 이 번호일 때만 적용 (추가 혜택용)
@@ -84,55 +85,87 @@ export const benefitMax = b => {
 const qualifies = (b, amount) => (b.min == null || amount >= b.min) && (b.lt == null || amount < b.lt);
 const cut = x => Math.floor(x + 1e-9); // 원 단위 절사 (부동소수 오차 보정)
 
+// ---- 기간(period) 계산 도우미 ----
+export const PERIOD_UNIT = { 1: "월", 3: "분기", 6: "반기", 12: "연" };
+const pOf = b => b.period || 1;
+const mo = t => t.month || (t.date || "").slice(0, 7);
+// 같은 기간이면 같은 키. period=6 → 1~6월은 "2026|0", 7~12월은 "2026|1"
+export const periodKey = (month, p) => p === 1 ? month : month.slice(0, 4) + "|" + Math.floor((+month.slice(5, 7) - 1) / p);
+// month가 속한 기간의 시작월 ('YYYY-MM')
+export const periodStart = (month, p) => month.slice(0, 4) + "-" + String(Math.floor((+month.slice(5, 7) - 1) / p) * p + 1).padStart(2, "0");
+
 /**
- * 카드 하나의 이번 달 계산.
- * txs: 이 카드의 사용 내역 [{ id, date, amount, benefitIdx(-1이면 혜택 선택 없음), extraIdx?(추가 혜택) }]
+ * 카드 하나의 계산.
+ * txs: 이 카드의 사용 내역 (opts.month 이하의 달들, 기간 혜택을 위해 이전 달 포함 가능)
+ *      [{ id, month, date, amount, benefitIdx(-1이면 혜택 선택 없음), extraIdx?(추가 혜택) }]
+ * opts.month: 계산 기준 달 ('YYYY-MM'). 생략하면 txs 중 가장 늦은 달
+ * opts.prevSpent: 이 카드의 전월 사용액 (prevMin 조건 판단용, 없으면 조건 무시. 기준 달의 결제에만 적용)
  * 규칙
  *  - 결제를 날짜순으로 처리 (한도는 먼저 쓴 결제가 먼저 소진)
+ *  - 횟수·한도·일 1회·합산 한도·sumMin은 혜택의 기간(period)마다 따로 센다 (기본 매월)
  *  - 선택한 혜택: 최소 결제금액(min)을 못 넘으면 적용도, 횟수(slots) 차감도 없음
  *  - daily 혜택은 같은 날짜에 한 번만 적용
- *  - sumMin 혜택은 선택한 결제금액의 누적 합이 조건을 넘는 순간 적용 (월 slots회)
+ *  - sumMin 혜택은 선택한 결제금액의 누적 합이 조건을 넘는 순간 적용
  *  - ticket 혜택은 (결제 내역의 list || 혜택의 list) - 실제 결제금액이 혜택
- *  - 1회 한도(per) → 혜택 월 한도(max) → 그룹 합산 한도(groupMax) 순으로 제한
- *  - all:true 혜택은 조건(min/lt)에 맞는 결제에 자동 적용 (단, 선택한 혜택이 적용된 결제는 제외)
+ *  - 1회 한도(per) → 혜택 한도(max) → 그룹 합산 한도(groupMax) 순으로 제한
+ *  - all:true 혜택은 조건(min/lt)에 맞는 기준 달 결제에 자동 적용 (단, 선택한 혜택이 적용된 결제는 제외)
  *  - 할인액은 결제 건마다 원 단위 버림
- * opts.prevSpent: 이 카드의 전월 사용액 (prevMin 조건 판단용, 없으면 조건 무시)
- * 반환: spent(실적), sum(혜택 합계), per[i](혜택별 금액), used[i](사용 횟수), by[txId](결제별 혜택), grp(그룹별 누적 혜택)
+ * 반환: spent(기준 달 실적), sum(기준 달 혜택 합계), per[i]/used[i]/sums[i]/days[i](기준 달이 속한 기간의 값),
+ *       by[txId](결제별 혜택), grp(그룹별 누적 혜택)
  */
 export function calcCard(card, txs, opts = {}) {
-  const n = card.benefits.length;
-  const per = Array(n).fill(0), used = Array(n).fill(0), run = Array(n).fill(0), sums = Array(n).fill(0);
-  const grp = {}, by = {}, days = Array.from({ length: n }, () => new Set());
-  const spent = txs.reduce((s, t) => s + (t.amount || 0), 0);
-  const add = (t, i, x) => { per[i] += x; by[t.id] = (by[t.id] || 0) + x; };
+  const cm = opts.month || txs.reduce((a, t) => (mo(t) > a ? mo(t) : a), "");
+  const scope = txs.filter(t => mo(t) && mo(t) <= cm);
+  const inMonth = scope.filter(t => mo(t) === cm);
+  const spent = inMonth.reduce((s, t) => s + (t.amount || 0), 0);
+  const U = new Map(), R = new Map(), S = new Map(), D = new Map(), G = new Map();
+  const g0 = (m, k) => m.get(k) ?? 0;
+  const by = {}, autoPer = {};
+  const key = (i, month) => i + "|" + periodKey(month, pOf(card.benefits[i]));
+  const add = (t, x) => { by[t.id] = (by[t.id] || 0) + x; };
 
   // 결제 t에 혜택 i를 적용해 본다. 실제로 적용되면 true
   const grant = (t, i) => {
     const b = card.benefits[i];
     if (!b || b.all) return false;
-    if (b.prevMin != null && opts.prevSpent != null && opts.prevSpent < b.prevMin) return false;
+    if (b.prevMin != null && opts.prevSpent != null && mo(t) === cm && opts.prevSpent < b.prevMin) return false;
     if (b.needs != null && t.benefitIdx !== b.needs) return false;
-    if (b.sumMin != null) sums[i] += t.amount || 0; // 합산 조건: 선택한 결제금액을 누적
-    if (!((b.sumMin == null || sums[i] >= b.sumMin) && qualifies(b, t.amount) && used[i] < slotCap(b) && !(b.daily && t.date && days[i].has(t.date)))) return false;
-    if (b.daily && t.date) days[i].add(t.date);
+    const k = key(i, mo(t));
+    if (b.sumMin != null) S.set(k, g0(S, k) + (t.amount || 0)); // 합산 조건: 선택한 결제금액을 누적
+    const days = D.get(k) || new Set();
+    if (!((b.sumMin == null || g0(S, k) >= b.sumMin) && qualifies(b, t.amount) && g0(U, k) < slotCap(b) && !(b.daily && t.date && days.has(t.date)))) return false;
+    if (b.daily && t.date) { days.add(t.date); D.set(k, days); }
     let x = b.ticket != null ? Math.max(0, (t.list ?? b.list ?? b.ticket) - t.amount)
       : b.fixed != null ? b.fixed : cut(Math.min(t.amount * b.rate, b.per ?? Infinity));
-    x = Math.min(x, (b.max ?? Infinity) - run[i]);
-    if (b.group) x = Math.min(x, (b.groupMax ?? Infinity) - (grp[b.group] || 0));
+    x = Math.min(x, (b.max ?? Infinity) - g0(R, k));
+    const gk = b.group ? b.group + "|" + periodKey(mo(t), pOf(b)) : null;
+    if (gk) x = Math.min(x, (b.groupMax ?? Infinity) - g0(G, gk));
     x = Math.max(0, x);
-    used[i]++; run[i] += x;
-    if (b.group) grp[b.group] = (grp[b.group] || 0) + x;
-    add(t, i, x);
+    U.set(k, g0(U, k) + 1); R.set(k, g0(R, k) + x);
+    if (gk) G.set(gk, g0(G, gk) + x);
+    add(t, x);
     return true;
   };
 
-  [...txs].sort((a, b) => (a.date || "").localeCompare(b.date || "") || String(a.id).localeCompare(String(b.id)))
+  [...scope].sort((a, b) => (a.date || "").localeCompare(b.date || "") || String(a.id).localeCompare(String(b.id)))
     .forEach(t => {
       const applied = grant(t, t.benefitIdx); // 선택한 혜택이 실제로 적용된 결제인지
       if (t.extraIdx != null && t.extraIdx !== t.benefitIdx) grant(t, t.extraIdx); // 추가 혜택(KB Pay 등)
+      if (mo(t) !== cm) return;
       card.benefits.forEach((ab, j) => {
-        if (ab.all && !applied && qualifies(ab, t.amount)) add(t, j, cut(t.amount * ab.rate));
+        if (ab.all && !applied && qualifies(ab, t.amount)) { const x = cut(t.amount * ab.rate); autoPer[j] = (autoPer[j] || 0) + x; add(t, x); }
       });
     });
-  return { spent, per, used, by, grp, sums, days, sum: per.reduce((a, b) => a + b, 0) };
+
+  const at = i => key(i, cm);
+  const grp = {};
+  card.benefits.forEach(b => { if (b.group) grp[b.group] = g0(G, b.group + "|" + periodKey(cm, pOf(b))); });
+  return {
+    spent, by, grp,
+    per: card.benefits.map((b, i) => b.all ? (autoPer[i] || 0) : g0(R, at(i))),
+    used: card.benefits.map((b, i) => g0(U, at(i))),
+    sums: card.benefits.map((b, i) => g0(S, at(i))),
+    days: card.benefits.map((b, i) => D.get(at(i)) || new Set()),
+    sum: inMonth.reduce((s, t) => s + (by[t.id] || 0), 0)
+  };
 }
