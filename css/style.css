@@ -251,3 +251,7 @@ body.no-scroll{overflow:hidden}
 .img-btn{display:inline-flex;align-items:center;height:40px;padding:0 16px;border-radius:12px;border:1px solid var(--ac);background:var(--card);color:var(--ac);font:inherit;font-size:13px;font-weight:700;cursor:pointer}
 .img-btn.del{border-color:var(--bd);color:var(--wn)}
 .card-actions{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:10px;margin-top:24px}
+/* 저장본으로 먼저 보여주는 동안(Firebase 연결 전) 제목 옆에 작은 점 */
+body.syncing #page-title::after{content:"";display:inline-block;width:8px;height:8px;margin-left:10px;border-radius:50%;background:var(--ac);vertical-align:middle;animation:sync-pulse 1s ease-in-out infinite}
+@keyframes sync-pulse{50%{opacity:.2}}
+.btn-google:disabled{opacity:.6;cursor:default}
