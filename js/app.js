@@ -1,5 +1,5 @@
 import {
-  configured, auth, db, GoogleAuthProvider, signInWithPopup, signInWithRedirect,
+  configured, ready, auth, db, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult,
   onAuthStateChanged, signOut, collection, doc, onSnapshot, query, where, orderBy, writeBatch, addDoc, serverTimestamp, deleteDoc, updateDoc, deleteField, getDocs
 } from "./firebase.js";
 import { CARD_SEED, SEED_VERSION, CARD_IMG, CARD_THUMB, calcCard, byEntry, benefitMax, slotCap, PERIOD_UNIT, monthKey, prevMonthKey, won,
@@ -14,7 +14,8 @@ const imgOf = c => CARD_IMG[c.id] || c.img || ""; // 기본 카드는 파일, �
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 const state = { user: null, cards: null, txs: [], unsubs: [], tab: "home", detail: null,
-  month: monthKey(), listTab: "card", histTxs: null, histUnsub: null, histKey: null, form: null, cform: null, delCard: null, cardView: null, modal: null };
+  month: monthKey(), listTab: "card", histTxs: null, histUnsub: null, histKey: null, form: null, cform: null, delCard: null, cardView: null, modal: null,
+  synced: false }; // synced: Firebase 로그인 확인·연결이 끝났는지 (끝나기 전에는 저장류 동작을 막는다)
 
 /* ---------- 내비게이션 (모바일 하단 탭 + PC 사이드바 공용) ---------- */
 const ICONS = {
@@ -59,7 +60,7 @@ document.addEventListener("click", e => {
   if (e.target.closest("[data-tx-del]")) { state.modal.del = true; renderModal(); }
   if (e.target.closest("[data-tx-del-no]")) { state.modal.del = false; renderModal(); }
   if (e.target.closest("[data-tx-del-yes]")) deleteTx(state.modal?.id);
-  if (e.target.closest("[data-logout]")) signOut(auth);
+  if (e.target.closest("[data-logout]") && !needSync()) { clearCache(); signOut(auth); }
 });
 let toastTimer;
 function toast(msg) {
@@ -75,14 +76,48 @@ $("btn-google").addEventListener("click", async () => {
   try {
     await signInWithPopup(auth, provider);
   } catch (err) {
-    if (err.code === "auth/popup-blocked") return signInWithRedirect(auth, provider);
+    if (err.code === "auth/popup-blocked") { sessionStorage.setItem("cpn:redirect", "1"); return signInWithRedirect(auth, provider); }
     if (err.code === "auth/popup-closed-by-user" || err.code === "auth/cancelled-popup-request") return;
     $("login-msg").textContent = "로그인에 실패했어요: " + err.code;
   }
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && state.modal) closeModal(); });
 
-function start() {
+/* ---------- 빠른 첫 화면 ----------
+ * Firebase SDK를 다 받을 때까지 기다리지 않고, 기기에 저장해 둔 마지막 데이터로 화면을 먼저 그린다.
+ * SDK가 준비되고 로그인이 확인되면 진짜 데이터로 자연스럽게 바뀐다. 로그아웃하면 저장본은 지운다. */
+const CACHE_KEY = "cpn:cache:v1", AUTHED_KEY = "cpn:authed";
+let fromCache = false, cacheTimer;
+function readCache() {
+  try { const c = JSON.parse(localStorage.getItem(CACHE_KEY)); return c && c.v === 1 && c.uid && Array.isArray(c.cards) && Array.isArray(c.txs) ? c : null; } catch { return null; }
+}
+function saveCache() { // 데이터가 바뀔 때마다 0.4초 뒤 한 번만 저장
+  clearTimeout(cacheTimer);
+  cacheTimer = setTimeout(() => {
+    if (!state.synced || !state.user || !state.cards) return;
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify({ v: 1, uid: state.user.uid, user: { email: state.user.email, displayName: state.user.displayName },
+        cards: state.cards.map(({ img, ...c }) => c), // 직접 올린 카드 이미지는 용량이 커서 제외 (Firebase에서 받으면 표시됨)
+        txs: state.txs.map(t => ({ ...t, createdAt: t.createdAt?.toMillis?.() ?? null })) }));
+    } catch { /* 저장 공간 부족 등은 무시 */ }
+  }, 400);
+}
+function clearCache() { clearTimeout(cacheTimer); try { localStorage.removeItem(CACHE_KEY); localStorage.removeItem(AUTHED_KEY); } catch { /* 무시 */ } }
+function bootFromCache() {
+  const c = readCache();
+  if (!c) return false;
+  state.user = { uid: c.uid, email: c.user?.email, displayName: c.user?.displayName };
+  state.cards = c.cards;
+  state.txs = c.txs.map(t => ({ ...t, createdAt: t.createdAt == null ? null : { toMillis: () => t.createdAt } })); // 입력 순서 정렬용
+  fromCache = true;
+  $("login").hidden = true; $("app").hidden = false; $("boot")?.remove();
+  render();
+  return true;
+}
+// Firebase가 아직 준비 안 됐을 때 저장·삭제를 누르면 안내만 하고 막는다
+const needSync = () => { if (state.synced) return false; toast("동기화 중이에요. 잠시 후 다시 시도해 주세요"); return true; };
+
+async function start() {
   resetNav(); // 새로고침/앱 복원 후 남아있는 상세·폼 기록 정리
   renderNav();
   if (!configured) {
@@ -92,16 +127,36 @@ function start() {
     $("btn-google").disabled = true;
     return;
   }
+  const hasCache = bootFromCache();
+  // 로그인한 적이 없거나 로그아웃한 상태면 SDK를 기다리지 않고 로그인 화면부터 보여준다
+  if (!hasCache && !localStorage.getItem(AUTHED_KEY)) { $("boot")?.remove(); $("login").hidden = false; }
+  $("btn-google").disabled = true; // SDK가 준비되기 전에 누르면 팝업이 막히므로 잠깐 비활성
+  try { await ready; } catch {
+    if (hasCache) toast("연결이 안 돼서 저장된 화면을 보여드려요");
+    else { $("boot")?.remove(); $("login").hidden = false; $("login-msg").textContent = "Firebase를 불러오지 못했어요. 네트워크를 확인하고 새로고침해 주세요."; }
+    return;
+  }
+  $("btn-google").disabled = false;
+  if (sessionStorage.getItem("cpn:redirect")) { sessionStorage.removeItem("cpn:redirect"); try { await getRedirectResult(auth); } catch { /* 결과는 아래 onAuthStateChanged로 확인 */ } }
   onAuthStateChanged(auth, user => {
+    const keep = fromCache && !!user && user.uid === state.user?.uid; // 저장본으로 먼저 보여준 같은 사용자면 화면을 그대로 둔다
+    const wasCached = fromCache;
+    fromCache = false;
     state.unsubs.forEach(u => u()); state.unsubs = [];
-    state.histUnsub?.(); state.histUnsub = null; state.histTxs = null; state.histKey = null; state.form = null; state.cform = null; state.delCard = null; state.cardView = null; state.modal = null;
-    state.user = user; state.cards = null; state.txs = [];
+    if (wasCached && !keep) clearCache(); // 저장본이 다른 사용자 것이거나 로그아웃 상태면 지운다
+    if (!keep) {
+      state.histUnsub?.(); state.histUnsub = null; state.histTxs = null; state.histKey = null; state.form = null; state.cform = null; state.delCard = null; state.cardView = null; state.modal = null;
+      state.cards = null; state.txs = [];
+    }
+    state.user = user; state.synced = !!user;
     $("login").hidden = !!user;
     $("app").hidden = !user;
     $("boot")?.remove();
-    if (!user) return;
+    if (!user) { clearCache(); render(); return; }
+    try { localStorage.setItem(AUTHED_KEY, "1"); } catch { /* 무시 */ }
     render();
     subscribe(user.uid);
+    if (state.tab === "list") ensureHist(); // 저장본으로 보는 동안 못 받은 월별 기록 구독
   });
 }
 
@@ -114,6 +169,7 @@ function subscribe(uid) {
     state.cards = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     migrate(uid);
     render();
+    saveCache();
   }, err => toast("카드 불러오기 실패: " + err.code)));
 
   const txQ = query(collection(db, "users", uid, "transactions"),
@@ -121,6 +177,7 @@ function subscribe(uid) {
   state.unsubs.push(onSnapshot(txQ, snap => {
     state.txs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     render();
+    saveCache();
   }, err => toast("내역 불러오기 실패: " + err.code)));
 }
 
@@ -140,6 +197,7 @@ async function migrate(uid) {
 }
 
 async function seedCards() {
+  if (needSync()) return;
   const btn = $("btn-seed"); btn.disabled = true;
   try {
     const batch = writeBatch(db);
@@ -259,6 +317,7 @@ window.addEventListener("popstate", e => {
 });
 
 function render() {
+  document.body.classList.toggle("syncing", !state.synced);
   const card = state.detail && state.cards ? state.cards.find(c => c.id === state.detail) : null;
   const cview = state.cardView && state.cards ? state.cards.find(c => c.id === state.cardView) : null;
   const formOpen = !!state.form && !!state.cards?.length;
@@ -313,10 +372,10 @@ const shiftMonth = (key, d) => monthKey(new Date(+key.slice(0, 4), +key.slice(5)
 const dateLabel = d => d ? `${+d.slice(5, 7)}월 ${+d.slice(8, 10)}일 (${DOW[new Date(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10)).getDay()]})` : "날짜 없음";
 
 // 선택한 달 + 그 전달(지난달 대비용) 내역을 구독. 달을 바꿀 때마다 다시 구독
-function ensureHist() { if (!state.histUnsub || state.histKey !== state.month) subscribeHist(); }
+function ensureHist() { if (!state.synced) return; if (!state.histUnsub || state.histKey !== state.month) subscribeHist(); }
 function subscribeHist() {
   state.histUnsub?.(); state.histUnsub = null; state.histTxs = null;
-  if (!state.user) return;
+  if (!state.user || !state.synced) return;
   state.histKey = state.month;
   const q = query(collection(db, "users", state.user.uid, "transactions"),
     where("month", ">=", shiftMonth(state.month, -7)), where("month", "<=", state.month));
@@ -483,7 +542,7 @@ function renderModal() {
   el.hidden = false; document.body.classList.add("no-scroll");
 }
 function deleteTx(id) {
-  if (!id) return;
+  if (!id || needSync()) return;
   deleteDoc(doc(db, "users", state.user.uid, "transactions", id)).catch(err => toast("삭제 실패: " + err.code));
   closeModal(); toast("삭제했어요");
 }
@@ -643,7 +702,7 @@ document.addEventListener("change", e => {
 
 function saveForm() {
   const f = state.form, card = f && cardById(f.cardId);
-  if (!card || !formValid(f, card) || f.saving) return;
+  if (!card || !formValid(f, card) || f.saving || needSync()) return;
   f.saving = true; // 연타해도 한 번만 저장/뒤로가기
   const tx = { cardId: card.id, month: f.date.slice(0, 7), date: f.date, place: f.place.trim(), amount: +f.amount,
     benefitIdx: f.benefitOn ? f.benefitIdx : -1, createdAt: serverTimestamp() };
@@ -723,6 +782,7 @@ function customCardImgRow(card) {
     ${card.img ? `<button type="button" class="img-btn del" data-card-imgdel="${esc(card.id)}">이미지 삭제</button>` : ""}</div>`;
 }
 async function changeCardImg(id, file) {
+  if (needSync()) return;
   try {
     const im = await loadImg(file), img = renderCardImg(im, autoRot(im));
     updateDoc(doc(db, "users", state.user.uid, "cards", id), { img }).catch(err => toast("저장 실패: " + err.code));
@@ -882,7 +942,7 @@ function openCardEdit(id) {
 /* 카드 삭제: 이 카드의 사용 내역까지 함께 지운다 */
 const cardTxQuery = id => query(collection(db, "users", state.user.uid, "transactions"), where("cardId", "==", id));
 function openDelCard(id) {
-  if (!cardById(id)) return;
+  if (!cardById(id) || needSync()) return;
   state.delCard = { id, n: null, busy: false };
   renderDelCard();
   getDocs(cardTxQuery(id)).then(snap => { if (state.delCard?.id === id) { state.delCard.n = snap.size; renderDelCard(); } })
@@ -920,7 +980,7 @@ document.addEventListener("keydown", e => { if (e.key === "Escape" && state.delC
 
 function saveCardForm() {
   const f = state.cform;
-  if (!f || f.saving || cardDraftIssues(f).length) return;
+  if (!f || f.saving || cardDraftIssues(f).length || needSync()) return;
   f.saving = true; // 연타해도 한 번만 저장/뒤로가기
   if (f.editId) return saveCardEdit(f);
   const card = draftToCard(f);
@@ -981,7 +1041,7 @@ document.addEventListener("click", e => {
   if (e.target.closest("[data-del-yes]")) return confirmDelCard();
   if (e.target.closest("[data-dialog-close]")) return closeDelCard();
   const di = e.target.closest("[data-card-imgdel]");
-  if (di) { updateDoc(doc(db, "users", state.user.uid, "cards", di.dataset.cardImgdel), { img: deleteField() }).catch(err => toast("삭제 실패: " + err.code)); toast("카드 이미지를 지웠어요"); return; }
+  if (di) { if (needSync()) return; updateDoc(doc(db, "users", state.user.uid, "cards", di.dataset.cardImgdel), { img: deleteField() }).catch(err => toast("삭제 실패: " + err.code)); toast("카드 이미지를 지웠어요"); return; }
   const f = state.cform, t = f && e.target.closest("[data-cf-type],[data-cf-color],[data-cb-kind],[data-cb-toggle],[data-cb-adv],[data-cb-add],[data-cb-del],[data-cf-save],[data-cf-rot],[data-cf-imgdel]");
   if (!t) return;
   const d = t.dataset;
