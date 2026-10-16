@@ -2,13 +2,14 @@ import {
   configured, auth, db, GoogleAuthProvider, signInWithPopup, signInWithRedirect,
   onAuthStateChanged, signOut, collection, doc, onSnapshot, query, where, orderBy, writeBatch, addDoc, serverTimestamp, deleteDoc, updateDoc, deleteField, getDocs
 } from "./firebase.js";
-import { CARD_SEED, SEED_VERSION, CARD_IMG, calcCard, byEntry, benefitMax, slotCap, PERIOD_UNIT, monthKey, prevMonthKey, won,
+import { CARD_SEED, SEED_VERSION, CARD_IMG, CARD_THUMB, calcCard, byEntry, benefitMax, slotCap, PERIOD_UNIT, monthKey, prevMonthKey, won,
   draftToBenefit, draftToCard, benefitIssues, cardDraftIssues, previewBenefit, cardToDraft } from "./data.js";
 
 const $ = id => document.getElementById(id);
 // 한 달치 계산: 전월 사용액(prevMin 조건)까지 같이 넘겨준다
 const spentOf = (pool, m, cardId) => pool.filter(t => t.month === m && t.cardId === cardId).reduce((s, t) => s + (t.amount || 0), 0);
 const calcFor = (card, pool, m) => calcCard(card, pool.filter(t => t.cardId === card.id && t.month <= m), { month: m, prevSpent: spentOf(pool, shiftMonth(m, -1), card.id) });
+const thumbOf = c => CARD_THUMB[c.id] || imgOf(c); // 목록용 작은 이미지
 const imgOf = c => CARD_IMG[c.id] || c.img || ""; // 기본 카드는 파일, 직접 추가한 카드는 저장된 이미지
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -85,6 +86,7 @@ function start() {
   resetNav(); // 새로고침/앱 복원 후 남아있는 상세·폼 기록 정리
   renderNav();
   if (!configured) {
+    $("boot")?.remove();
     $("login").hidden = false;
     $("login-msg").textContent = "js/firebase-config.js에 Firebase 설정값을 먼저 넣어주세요.";
     $("btn-google").disabled = true;
@@ -96,6 +98,7 @@ function start() {
     state.user = user; state.cards = null; state.txs = [];
     $("login").hidden = !!user;
     $("app").hidden = !user;
+    $("boot")?.remove();
     if (!user) return;
     render();
     subscribe(user.uid);
@@ -288,7 +291,7 @@ function renderCards() {
       const pct = Math.min(100, r.spent / card.target * 100);
       const need = card.target - r.spent;
       return `<article class="box row-card" data-card="${esc(card.id)}">
-        ${imgOf(card) ? `<img class="thumb" src="${esc(imgOf(card))}" alt="">` : `<div class="cc-ico" style="background:${esc(card.color)}"><img src="images/credit-card.png" alt=""></div>`}
+        ${imgOf(card) ? `<img class="thumb" src="${esc(thumbOf(card))}" width="68" height="43" decoding="async" alt="">` : `<div class="cc-ico" style="background:${esc(card.color)}"><img src="images/credit-card.png" alt=""></div>`}
         <div class="mid">
           <div class="nm">${esc(card.name)}</div>
           <div class="meta">${esc(card.type)}카드 · ${Math.round(pct)}%</div>
@@ -362,7 +365,7 @@ function renderHistory() {
   let body;
   if (state.listTab === "card") {
     body = `<section class="rows" style="margin-top:14px">${rows.map(({ card, txs, r }) => `<article class="box row-card" data-cardview="${esc(card.id)}">
-      ${imgOf(card) ? `<img class="thumb" src="${esc(imgOf(card))}" alt="">` : `<div class="cc-ico" style="background:${esc(card.color)}"><img src="images/credit-card.png" alt=""></div>`}
+      ${imgOf(card) ? `<img class="thumb" src="${esc(thumbOf(card))}" width="68" height="43" decoding="async" alt="">` : `<div class="cc-ico" style="background:${esc(card.color)}"><img src="images/credit-card.png" alt=""></div>`}
       <div class="mid"><div class="nm">${esc(card.name)}</div>
         <div class="meta">사용 ${won(r.spent)}원 · ${txs.length}건</div></div>
       <div class="rt ${r.sum > 0 ? "ok" : ""}">${won(r.sum)}원</div><span class="chev" aria-hidden="true">›</span></article>`).join("")}</section>`;
@@ -1046,7 +1049,7 @@ function renderDetail(card) {
       <h2>${esc(card.name)}</h2>
       <span class="chip ac">${esc(card.type)}카드</span>
     </div>
-    ${imgOf(card) ? `<img class="card-img" src="${esc(imgOf(card))}" alt="${esc(card.name)}">` : cardFace(card)}
+    ${imgOf(card) ? `<img class="card-img" src="${esc(imgOf(card))}" width="380" height="240" decoding="async" alt="${esc(card.name)}">` : cardFace(card)}
     ${customCardImgRow(card)}
 
     <section class="summary" style="margin-top:16px">

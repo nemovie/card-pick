@@ -70,6 +70,11 @@ export const CARD_IMG = {
   sam: "images/cards/sam.webp", pang: "images/cards/pang.webp", shin: "images/cards/shin.webp",
   nori: "images/cards/nori.webp", woo: "images/cards/woo.webp"
 };
+// 목록용 작은 이미지 (68px 썸네일에 640px 원본을 받지 않도록)
+export const CARD_THUMB = {
+  sam: "images/cards/thumb/sam.webp", pang: "images/cards/thumb/pang.webp", shin: "images/cards/thumb/shin.webp",
+  nori: "images/cards/thumb/nori.webp", woo: "images/cards/thumb/woo.webp"
+};
 
 const pad = n => String(n).padStart(2, "0");
 export const monthKey = (d = new Date()) => d.getFullYear() + "-" + pad(d.getMonth() + 1);
